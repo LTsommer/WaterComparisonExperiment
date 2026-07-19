@@ -45,8 +45,12 @@
       document.body.appendChild(renderer.domElement);
 
       const scene = new THREE.Scene();
-      scene.background = new THREE.Color('#071a2b');
-      scene.fog = new THREE.FogExp2('#6f9eae', 0.0095);
+      const surfaceBackground = new THREE.Color('#071a2b');
+      const underwaterBackground = new THREE.Color('#042c35');
+      const atmosphereColor = new THREE.Color('#6f9eae');
+      const underwaterFogColor = new THREE.Color('#06414b');
+      scene.background = surfaceBackground.clone();
+      scene.fog = new THREE.FogExp2(atmosphereColor, 0.0095);
 
       const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.1, 500);
       camera.position.set(11.5, 5.4, 14.5);
@@ -61,12 +65,16 @@
       controls.maxPolarAngle = Math.PI * 0.92;
 
       const sunDirection = new THREE.Vector3(-0.48, 0.54, -0.69).normalize();
+      const skyUniforms = {
+        uSunDirection: { value: sunDirection },
+        uCameraSubmersion: { value: 0 },
+      };
       const sky = new THREE.Mesh(
         new THREE.SphereGeometry(220, 32, 16),
         new THREE.ShaderMaterial({
           side: THREE.BackSide,
           depthWrite: false,
-          uniforms: { uSunDirection: { value: sunDirection } },
+          uniforms: skyUniforms,
           vertexShader: /* glsl */`
             varying vec3 vDirection;
             void main() {
@@ -76,6 +84,7 @@
           `,
           fragmentShader: /* glsl */`
             uniform vec3 uSunDirection;
+            uniform float uCameraSubmersion;
             varying vec3 vDirection;
             void main() {
               vec3 direction = normalize(vDirection);
@@ -86,6 +95,9 @@
               float sunset = pow(max(dot(direction, uSunDirection), 0.0), 7.0);
               float sunCore = pow(max(dot(direction, uSunDirection), 0.0), 850.0);
               skyColor += sunset * vec3(0.38, 0.19, 0.08) + sunCore * vec3(8.0, 5.0, 2.4);
+              float waterGlow = smoothstep(-0.68, 0.86, direction.y);
+              vec3 underwaterColor = mix(vec3(0.002, 0.035, 0.044), vec3(0.026, 0.24, 0.255), waterGlow);
+              skyColor = mix(skyColor, underwaterColor, uCameraSubmersion);
               gl_FragColor = vec4(skyColor, 1.0);
               #include <tonemapping_fragment>
               #include <colorspace_fragment>
@@ -124,7 +136,8 @@
         uAbsorption: { value: new THREE.Vector3(0.58, 0.19, 0.075) },
         uScatterColor: { value: new THREE.Color('#075d70') },
         uSeabedColor: { value: new THREE.Color('#5b5946') },
-        uFogColor: { value: new THREE.Color('#6f9eae') },
+        uFogColor: { value: atmosphereColor.clone() },
+        uCameraSubmersion: { value: 0 },
       };
       const waterMaterial = new THREE.ShaderMaterial({
         uniforms: waterUniforms,
@@ -217,6 +230,7 @@
           uniform vec3 uScatterColor;
           uniform vec3 uSeabedColor;
           uniform vec3 uFogColor;
+          uniform float uCameraSubmersion;
           varying vec3 vWorldPosition;
           varying vec3 vWorldNormal;
           varying float vCrest;
@@ -280,6 +294,7 @@
             vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
             vec3 normal = normalize(vWorldNormal + vec3(-microSlope.x, 0.0, -microSlope.y));
             if (!gl_FrontFacing) normal = -normal;
+            float underside = gl_FrontFacing ? 0.0 : 1.0;
             float normalDotView = max(dot(normal, viewDirection), 0.001);
             float normalDotLight = max(dot(normal, uSunDirection), 0.0);
 
@@ -316,6 +331,8 @@
 
             vec3 color = mix(bodyColor, reflection, fresnel);
             color += sunSpecular;
+            vec3 underwaterCeiling = mix(vec3(0.004, 0.080, 0.100), reflection * vec3(0.34, 0.58, 0.62), 0.78);
+            color = mix(color, underwaterCeiling, underside * uCameraSubmersion);
 
             // Wind-stretched breakup is only revealed where Gerstner bands are
             // horizontally compressed, so foam follows breaking crests.
@@ -328,7 +345,7 @@
             float foamTexture = mix(smallBreakup, longStreaks, 0.62);
             float foamMask = vCrest * smoothstep(0.47, 0.74, foamTexture + vCrest * 0.20);
             vec3 foamColor = vec3(0.72, 0.82, 0.79) * (0.82 + normalDotLight * 0.32);
-            color = mix(color, foamColor, foamMask * 0.86);
+            color = mix(color, foamColor, foamMask * 0.86 * (1.0 - underside * uCameraSubmersion));
 
             float distanceToCamera = length(cameraPosition - vWorldPosition);
             float fogFactor = 1.0 - exp(-distanceToCamera * distanceToCamera * 0.000078);
@@ -462,13 +479,20 @@
       function animate(now) {
         const time = clock.getElapsedTime();
         waterUniforms.uTime.value = time;
+        controls.update();
+        const cameraSubmersion = THREE.MathUtils.smoothstep(-camera.position.y, 0.05, 1.65);
+        skyUniforms.uCameraSubmersion.value = cameraSubmersion;
+        waterUniforms.uCameraSubmersion.value = cameraSubmersion;
+        waterUniforms.uFogColor.value.copy(atmosphereColor).lerp(underwaterFogColor, cameraSubmersion);
+        scene.fog.color.copy(atmosphereColor).lerp(underwaterFogColor, cameraSubmersion);
+        scene.fog.density = THREE.MathUtils.lerp(0.0095, 0.058, cameraSubmersion);
+        scene.background.copy(surfaceBackground).lerp(underwaterBackground, cameraSubmersion);
         sky.position.copy(camera.position);
         const buoyWave = sampleWaveHeight(-2.1, 1.6, time);
         buoy.position.y = buoyWave.height + 0.38;
         buoyNormal.set(-buoyWave.slopeX, 1, -buoyWave.slopeZ).normalize();
         buoyTargetRotation.setFromUnitVectors(worldUp, buoyNormal);
         buoy.quaternion.slerp(buoyTargetRotation, 0.065);
-        controls.update();
         adaptResolution(now);
         renderer.render(scene, camera);
       }
