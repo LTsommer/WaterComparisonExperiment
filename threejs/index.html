@@ -19,7 +19,7 @@
   </head>
   <body>
     <div class="hud title"><strong>THREE.JS · SPECTRAL OCEAN</strong><span>多尺度波谱 / 波群域扭曲 / Beer–Lambert 吸收 / GGX 水面</span></div>
-    <div class="hud meta"><span class="dot"></span>自适应分辨率 · 实时 GPU 水体<br />拖拽旋转 · 滚轮缩放</div>
+    <div class="hud meta"><span class="dot"></span>自适应分辨率 · 实时 GPU 水体<br />拖拽旋转（可下潜）· 滚轮缩放</div>
     <script type="importmap">
       { "imports": { "three": "https://unpkg.com/three@0.180.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.180.0/examples/jsm/" } }
     </script>
@@ -56,7 +56,9 @@
       controls.dampingFactor = 0.055;
       controls.minDistance = 7;
       controls.maxDistance = 34;
-      controls.maxPolarAngle = Math.PI * 0.47;
+      // Let the orbit continue below the waterline, while retaining a small
+      // margin before the OrbitControls pole singularity.
+      controls.maxPolarAngle = Math.PI * 0.92;
 
       const sunDirection = new THREE.Vector3(-0.48, 0.54, -0.69).normalize();
       const sky = new THREE.Mesh(
@@ -126,7 +128,7 @@
       };
       const waterMaterial = new THREE.ShaderMaterial({
         uniforms: waterUniforms,
-        side: THREE.FrontSide,
+        side: THREE.DoubleSide,
         extensions: { derivatives: true },
         vertexShader: /* glsl */`
           uniform float uTime;
@@ -277,6 +279,7 @@
 
             vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
             vec3 normal = normalize(vWorldNormal + vec3(-microSlope.x, 0.0, -microSlope.y));
+            if (!gl_FrontFacing) normal = -normal;
             float normalDotView = max(dot(normal, viewDirection), 0.001);
             float normalDotLight = max(dot(normal, uSunDirection), 0.0);
 

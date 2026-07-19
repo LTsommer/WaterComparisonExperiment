@@ -18,8 +18,8 @@
 
 | 运行环境 | 入口 | 操作 |
 | --- | --- | --- |
-| Three.js 标准版 | `threejs/index.html` | 在项目根目录运行 `python3 -m http.server 8000`，再打开 `http://localhost:8000/threejs/`。 |
-| Three.js Extreme | `threejs/extreme/index.html` | 使用同一服务打开 `http://localhost:8000/threejs/extreme/`；按 `1 / 2 / 3` 或使用左下角按钮切换画质。 |
+| Three.js 标准版 | `threejs/index.html` | 在项目根目录运行 `python3 -m http.server 8000`，再打开 `http://localhost:8000/threejs/`；拖拽镜头可下潜到水下。 |
+| Three.js Extreme | `threejs/extreme/index.html` | 使用同一服务打开 `http://localhost:8000/threejs/extreme/`；可向下拖拽下潜，按 `1 / 2 / 3` 或使用左下角按钮切换画质。 |
 | Unity Built-in | `unity` | 在 Unity Hub 中打开 `unity`，选择 `Water Comparison > Create cinematic ocean scene`，打开 `Assets/Scenes/WaterComparison.unity` 后 Play。 |
 | Unity Extreme | `unity/Assets/Scenes/WaterComparisonExtreme.unity` | 选择 `Water Comparison > Create EXTREME ocean scene` 后 Play；按 `1 / 2 / 3` 切换流畅、高、极致画质。 |
 

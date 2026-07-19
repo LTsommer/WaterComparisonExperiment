@@ -109,7 +109,7 @@
       <div class="metric"><span>PIXEL RATIO</span><b id="dpr">--</b></div>
       <div class="metric"><span>REFLECTION</span><b id="reflection">--</b></div>
     </div>
-    <div class="hint">拖拽环视 · 滚轮推拉 · 右键平移<br />数字键 1 / 2 / 3 切换画质</div>
+    <div class="hint">拖拽环视（向下可潜入）· 滚轮推拉 · 右键平移<br />数字键 1 / 2 / 3 切换画质</div>
 
     <script type="importmap">
       { "imports": { "three": "https://unpkg.com/three@0.180.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.180.0/examples/jsm/" } }
@@ -200,7 +200,9 @@
       controls.minDistance = 5.5;
       controls.maxDistance = 35;
       controls.minPolarAngle = 0.12;
-      controls.maxPolarAngle = Math.PI * 0.475;
+      // Leave enough angular range to orbit below the surface, but stop short
+      // of the pole where orbit controls become numerically unstable.
+      controls.maxPolarAngle = Math.PI * 0.92;
 
       const sunDirection = new THREE.Vector3(-0.47, 0.44, -0.765).normalize();
       const skyUniforms = {
@@ -347,7 +349,7 @@
 
       const waterMaterial = new THREE.ShaderMaterial({
         uniforms: waterUniforms,
-        side: THREE.FrontSide,
+        side: THREE.DoubleSide,
         depthWrite: true,
         depthTest: true,
         fog: false,
@@ -576,6 +578,7 @@
 
             vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
             vec3 normal = normalize(vWorldNormal + vec3(-microSlope.x, 0.0, -microSlope.y));
+            if (!gl_FrontFacing) normal = -normal;
             float nDotV = max(dot(normal, viewDirection), 0.001);
             float nDotL = max(dot(normal, uSunDirection), 0.0);
             float agitation = clamp(length(microSlope) * 1.55 + vWaveEnergy * 0.15, 0.0, 1.0);
