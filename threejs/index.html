@@ -1,0 +1,481 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Three.js Cinematic Ocean</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; }
+      body { margin: 0; overflow: hidden; background: #06101c; color: #eaf7ff; font: 13px/1.55 Inter, ui-sans-serif, system-ui, sans-serif; }
+      canvas { display: block; }
+      .hud { position: fixed; z-index: 2; pointer-events: none; }
+      .title { top: 24px; left: 26px; padding: 14px 17px; border: 1px solid rgba(177, 225, 245, .22); border-radius: 12px; background: linear-gradient(135deg, rgba(6, 18, 31, .82), rgba(9, 37, 50, .54)); box-shadow: 0 18px 70px rgba(0, 0, 0, .3); backdrop-filter: blur(14px); letter-spacing: .02em; }
+      .title strong { display: block; color: #fff; font-size: 15px; letter-spacing: .12em; }
+      .title span { color: #a9ccda; }
+      .meta { right: 24px; bottom: 22px; color: rgba(225, 243, 249, .72); text-align: right; text-shadow: 0 2px 12px #000; }
+      .dot { display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: #70e4dd; box-shadow: 0 0 14px #70e4dd; }
+    </style>
+  </head>
+  <body>
+    <div class="hud title"><strong>THREE.JS · SPECTRAL OCEAN</strong><span>多尺度波谱 / 波群域扭曲 / Beer–Lambert 吸收 / GGX 水面</span></div>
+    <div class="hud meta"><span class="dot"></span>自适应分辨率 · 实时 GPU 水体<br />拖拽旋转 · 滚轮缩放</div>
+    <script type="importmap">
+      { "imports": { "three": "https://unpkg.com/three@0.180.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.180.0/examples/jsm/" } }
+    </script>
+    <script type="module">
+      import * as THREE from 'three';
+      import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+      const renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: false,
+        stencil: false,
+        powerPreference: 'high-performance',
+      });
+      const dprCeiling = Math.min(devicePixelRatio, matchMedia('(pointer: coarse)').matches ? 1.3 : 1.6);
+      let renderDpr = dprCeiling;
+      renderer.setPixelRatio(renderDpr);
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.08;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      document.body.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color('#071a2b');
+      scene.fog = new THREE.FogExp2('#6f9eae', 0.0095);
+
+      const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.1, 500);
+      camera.position.set(11.5, 5.4, 14.5);
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.target.set(0, 0.15, 0);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.055;
+      controls.minDistance = 7;
+      controls.maxDistance = 34;
+      controls.maxPolarAngle = Math.PI * 0.47;
+
+      const sunDirection = new THREE.Vector3(-0.48, 0.54, -0.69).normalize();
+      const sky = new THREE.Mesh(
+        new THREE.SphereGeometry(220, 32, 16),
+        new THREE.ShaderMaterial({
+          side: THREE.BackSide,
+          depthWrite: false,
+          uniforms: { uSunDirection: { value: sunDirection } },
+          vertexShader: /* glsl */`
+            varying vec3 vDirection;
+            void main() {
+              vDirection = normalize((modelMatrix * vec4(position, 0.0)).xyz);
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: /* glsl */`
+            uniform vec3 uSunDirection;
+            varying vec3 vDirection;
+            void main() {
+              vec3 direction = normalize(vDirection);
+              float horizon = pow(1.0 - max(direction.y, 0.0), 2.2);
+              vec3 zenith = vec3(0.025, 0.115, 0.22);
+              vec3 horizonColor = vec3(0.55, 0.72, 0.76);
+              vec3 skyColor = mix(zenith, horizonColor, horizon);
+              float sunset = pow(max(dot(direction, uSunDirection), 0.0), 7.0);
+              float sunCore = pow(max(dot(direction, uSunDirection), 0.0), 850.0);
+              skyColor += sunset * vec3(0.38, 0.19, 0.08) + sunCore * vec3(8.0, 5.0, 2.4);
+              gl_FragColor = vec4(skyColor, 1.0);
+              #include <tonemapping_fragment>
+              #include <colorspace_fragment>
+            }
+          `,
+        })
+      );
+      scene.add(sky);
+
+      // Directionally spread, incommensurate bands.  The long swell, wind waves and
+      // short chop do not share a spatial or temporal period, so the surface does
+      // not visibly "loop" like a small stack of sines.
+      const waveSpectrum = [
+        [ 1.00,  0.09, 0.34, 18.60, 0.40, 0.82, 0.48],
+        [ 0.94, -0.34, 0.24, 12.90, 2.10, 0.88, 0.52],
+        [ 0.77,  0.64, 0.17,  9.30, 4.70, 0.94, 0.56],
+        [ 0.42,  0.91, 0.115, 6.45, 1.30, 1.03, 0.58],
+        [-0.31,  0.95, 0.078, 4.70, 5.40, 1.07, 0.55],
+        [-0.82,  0.57, 0.055, 3.50, 2.80, 1.15, 0.48],
+        [ 0.64, -0.77, 0.038, 2.65, 0.90, 1.22, 0.42],
+        [-0.08, -1.00, 0.028, 2.05, 3.65, 1.28, 0.36],
+      ].map(([x, z, amplitude, wavelength, phase, speed, chop]) => {
+        const inverseLength = 1 / Math.hypot(x, z);
+        return { x: x * inverseLength, z: z * inverseLength, amplitude, wavelength, phase, speed, chop };
+      });
+
+      // 176² vertices are enough for the displacement bands. Sub-pixel capillary
+      // ripples live in the fragment normal, avoiding wasteful micro-triangles.
+      const waterGeometry = new THREE.PlaneGeometry(90, 90, 176, 176);
+      waterGeometry.rotateX(-Math.PI / 2);
+      const waterUniforms = {
+        uTime: { value: 0 },
+        uSunDirection: { value: sunDirection },
+        uWaveData: { value: waveSpectrum.map((wave) => new THREE.Vector4(wave.x, wave.z, wave.amplitude, wave.wavelength)) },
+        uWaveMotion: { value: waveSpectrum.map((wave) => new THREE.Vector4(wave.phase, wave.speed, wave.chop, 0)) },
+        uAbsorption: { value: new THREE.Vector3(0.58, 0.19, 0.075) },
+        uScatterColor: { value: new THREE.Color('#075d70') },
+        uSeabedColor: { value: new THREE.Color('#5b5946') },
+        uFogColor: { value: new THREE.Color('#6f9eae') },
+      };
+      const waterMaterial = new THREE.ShaderMaterial({
+        uniforms: waterUniforms,
+        side: THREE.FrontSide,
+        extensions: { derivatives: true },
+        vertexShader: /* glsl */`
+          uniform float uTime;
+          const int WAVE_COUNT = 8;
+          const float TAU = 6.28318530718;
+          uniform vec4 uWaveData[WAVE_COUNT];
+          uniform vec4 uWaveMotion[WAVE_COUNT];
+          varying vec3 vWorldPosition;
+          varying vec3 vWorldNormal;
+          varying float vCrest;
+
+          vec2 warpedDomain(vec2 pointXZ, float time) {
+            vec2 first = vec2(
+              sin(dot(pointXZ, vec2(0.071, 0.043)) - time * 0.17),
+              cos(dot(pointXZ, vec2(-0.052, 0.083)) + time * 0.13)
+            );
+            vec2 second = vec2(
+              sin(dot(pointXZ, vec2(-0.033, 0.097)) + time * 0.11 + 1.7),
+              cos(dot(pointXZ, vec2(0.089, 0.027)) - time * 0.09 + 2.4)
+            );
+            return pointXZ + first * 0.43 + second * 0.21;
+          }
+
+          float packetEnvelope(vec2 pointXZ, vec2 direction, float offset, float time) {
+            vec2 acrossWind = vec2(-direction.y, direction.x);
+            vec2 oblique = normalize(direction + vec2(0.37, -0.21));
+            float packet = 0.84;
+            packet += 0.13 * sin(dot(pointXZ, acrossWind) * 0.103 + offset * 1.37 - time * 0.078);
+            packet += 0.09 * sin(dot(pointXZ, oblique) * 0.047 - offset * 0.71 + time * 0.035);
+            return clamp(packet, 0.62, 1.16);
+          }
+
+          void main() {
+            vec3 displaced = position;
+            vec3 tangent = vec3(1.0, 0.0, 0.0);
+            vec3 binormal = vec3(0.0, 0.0, 1.0);
+            vec2 domain = warpedDomain(position.xz, uTime);
+            float compression = 0.0;
+
+            for (int index = 0; index < WAVE_COUNT; index++) {
+              vec4 wave = uWaveData[index];
+              vec4 motion = uWaveMotion[index];
+              vec2 direction = normalize(wave.xy);
+              float waveNumber = TAU / wave.w;
+              float frequency = sqrt(9.81 * waveNumber) * motion.y;
+              float envelope = packetEnvelope(position.xz, direction, motion.x, uTime);
+              float waveAmplitude = wave.z * envelope;
+              float phase = waveNumber * dot(direction, domain) - frequency * uTime + motion.x;
+              float sine = sin(phase);
+              float cosine = cos(phase);
+              float horizontalAmplitude = motion.z * waveAmplitude;
+              float horizontalSlope = horizontalAmplitude * waveNumber;
+              float verticalSlope = waveAmplitude * waveNumber;
+
+              displaced.xz += direction * horizontalAmplitude * cosine;
+              displaced.y += waveAmplitude * sine;
+              tangent += vec3(
+                -horizontalSlope * direction.x * direction.x * sine,
+                verticalSlope * direction.x * cosine,
+                -horizontalSlope * direction.x * direction.y * sine
+              );
+              binormal += vec3(
+                -horizontalSlope * direction.x * direction.y * sine,
+                verticalSlope * direction.y * cosine,
+                -horizontalSlope * direction.y * direction.y * sine
+              );
+
+              // Gerstner horizontal compression, not raw height, creates foam.
+              compression += max(sine, 0.0) * min(horizontalSlope, 0.30);
+            }
+
+            vec3 localNormal = normalize(cross(binormal, tangent));
+            vWorldNormal = normalize(mat3(modelMatrix) * localNormal);
+            vec4 worldPosition = modelMatrix * vec4(displaced, 1.0);
+            vWorldPosition = worldPosition.xyz;
+            float compressedCrest = smoothstep(0.085, 0.225, compression);
+            float emergedCrest = smoothstep(-0.08, 0.42, displaced.y);
+            vCrest = compressedCrest * emergedCrest;
+            gl_Position = projectionMatrix * viewMatrix * worldPosition;
+          }
+        `,
+        fragmentShader: /* glsl */`
+          uniform float uTime;
+          uniform vec3 uSunDirection;
+          uniform vec3 uAbsorption;
+          uniform vec3 uScatterColor;
+          uniform vec3 uSeabedColor;
+          uniform vec3 uFogColor;
+          varying vec3 vWorldPosition;
+          varying vec3 vWorldNormal;
+          varying float vCrest;
+          const float PI = 3.14159265359;
+          const float TAU = 6.28318530718;
+
+          float hash21(vec2 p) {
+            vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+            p3 += dot(p3, p3.yzx + 33.33);
+            return fract((p3.x + p3.y) * p3.z);
+          }
+
+          float valueNoise(vec2 p) {
+            vec2 cell = floor(p);
+            vec2 fraction = fract(p);
+            fraction = fraction * fraction * (3.0 - 2.0 * fraction);
+            return mix(mix(hash21(cell), hash21(cell + vec2(1.0, 0.0)), fraction.x),
+                       mix(hash21(cell + vec2(0.0, 1.0)), hash21(cell + vec2(1.0, 1.0)), fraction.x), fraction.y);
+          }
+
+          vec3 skyReflection(vec3 direction) {
+            direction = normalize(direction);
+            float horizon = pow(1.0 - clamp(direction.y, 0.0, 1.0), 2.1);
+            vec3 skyColor = mix(vec3(0.018, 0.090, 0.18), vec3(0.50, 0.69, 0.73), horizon);
+            float warmHorizon = pow(max(1.0 - abs(direction.y), 0.0), 8.0);
+            skyColor += warmHorizon * vec3(0.11, 0.050, 0.016);
+            return skyColor;
+          }
+
+          void addMicroWave(inout vec2 slope, vec2 pointXZ, vec2 direction, float waveAmplitude,
+                            float wavelength, float speed, float phaseOffset) {
+            direction = normalize(direction);
+            float waveNumber = TAU / wavelength;
+            float phase = waveNumber * dot(pointXZ, direction)
+                        - sqrt(9.81 * waveNumber) * speed * uTime + phaseOffset;
+            float pixelFootprint = fwidth(phase);
+            float antiAlias = 1.0 - smoothstep(1.0, 3.0, pixelFootprint);
+            slope += direction * (waveAmplitude * waveNumber * cos(phase) * antiAlias);
+          }
+
+          float smithVisibility(float normalDotDirection, float roughness) {
+            float k = (roughness + 1.0);
+            k = k * k * 0.125;
+            return normalDotDirection / (normalDotDirection * (1.0 - k) + k);
+          }
+
+          void main() {
+            vec2 detailPosition = vWorldPosition.xz;
+            vec2 detailWarp = vec2(
+              sin(dot(detailPosition, vec2(0.19, 0.11)) - uTime * 0.23),
+              cos(dot(detailPosition, vec2(-0.13, 0.21)) + uTime * 0.17)
+            ) * 0.14;
+            vec2 microSlope = vec2(0.0);
+            vec2 microPoint = detailPosition + detailWarp;
+            addMicroWave(microSlope, microPoint, vec2( 1.00,  0.21), 0.0130, 1.17, 1.32, 0.30);
+            addMicroWave(microSlope, microPoint, vec2( 0.53,  0.85), 0.0090, 0.79, 1.41, 2.20);
+            addMicroWave(microSlope, microPoint, vec2(-0.38,  0.93), 0.0060, 0.53, 1.56, 4.10);
+            addMicroWave(microSlope, microPoint, vec2(-0.91,  0.41), 0.0042, 0.37, 1.68, 1.10);
+            addMicroWave(microSlope, microPoint, vec2( 0.69, -0.72), 0.0028, 0.255, 1.83, 5.40);
+
+            vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
+            vec3 normal = normalize(vWorldNormal + vec3(-microSlope.x, 0.0, -microSlope.y));
+            float normalDotView = max(dot(normal, viewDirection), 0.001);
+            float normalDotLight = max(dot(normal, uSunDirection), 0.0);
+
+            // Schlick dielectric Fresnel for water (IOR 1.333).
+            const float dielectricF0 = 0.02037;
+            float fresnel = dielectricF0 + (1.0 - dielectricF0) * pow(1.0 - normalDotView, 5.0);
+            vec3 reflection = skyReflection(reflect(-viewDirection, normal));
+
+            // Beer-Lambert extinction gives the water volume depth and wavelength-
+            // dependent colour instead of a glossy, opaque plastic base colour.
+            float verticalDepth = max(vWorldPosition.y + 2.25, 0.05);
+            float opticalDepth = min(verticalDepth / max(normalDotView, 0.18), 12.0);
+            vec3 transmittance = exp(-uAbsorption * opticalDepth);
+            vec3 seabedLight = uSeabedColor * transmittance * (0.58 + 0.30 * normalDotLight);
+            vec3 inScattering = uScatterColor * (vec3(1.0) - transmittance) * (0.62 + 0.38 * normalDotLight);
+            vec3 bodyColor = seabedLight + inScattering;
+
+            // Cook-Torrance / GGX sun glint. Roughness rises naturally in locally
+            // agitated patches rather than using a broad plastic Phong highlight.
+            float agitation = clamp(length(microSlope) * 1.9, 0.0, 1.0);
+            float roughness = mix(0.068, 0.115, agitation);
+            vec3 halfDirection = normalize(viewDirection + uSunDirection);
+            float normalDotHalf = max(dot(normal, halfDirection), 0.0);
+            float viewDotHalf = max(dot(viewDirection, halfDirection), 0.0);
+            float alpha = roughness * roughness;
+            float alphaSquared = alpha * alpha;
+            float denominator = normalDotHalf * normalDotHalf * (alphaSquared - 1.0) + 1.0;
+            float distribution = alphaSquared / max(PI * denominator * denominator, 0.00001);
+            float geometry = smithVisibility(normalDotView, roughness) * smithVisibility(normalDotLight, roughness);
+            vec3 sunFresnel = vec3(dielectricF0) + (vec3(1.0) - vec3(dielectricF0)) * pow(1.0 - viewDotHalf, 5.0);
+            vec3 sunSpecular = distribution * geometry * sunFresnel
+                             / max(4.0 * normalDotView * max(normalDotLight, 0.001), 0.001);
+            sunSpecular *= normalDotLight * vec3(7.0, 5.25, 3.45);
+
+            vec3 color = mix(bodyColor, reflection, fresnel);
+            color += sunSpecular;
+
+            // Wind-stretched breakup is only revealed where Gerstner bands are
+            // horizontally compressed, so foam follows breaking crests.
+            vec2 wind = normalize(vec2(1.0, 0.16));
+            vec2 acrossWind = vec2(-wind.y, wind.x);
+            vec2 advected = detailPosition - wind * uTime * 0.19;
+            vec2 streakCoordinates = vec2(dot(advected, wind) * 0.55, dot(advected, acrossWind) * 2.35);
+            float longStreaks = valueNoise(streakCoordinates);
+            float smallBreakup = valueNoise(advected * 1.72 + vec2(3.1, -1.7));
+            float foamTexture = mix(smallBreakup, longStreaks, 0.62);
+            float foamMask = vCrest * smoothstep(0.47, 0.74, foamTexture + vCrest * 0.20);
+            vec3 foamColor = vec3(0.72, 0.82, 0.79) * (0.82 + normalDotLight * 0.32);
+            color = mix(color, foamColor, foamMask * 0.86);
+
+            float distanceToCamera = length(cameraPosition - vWorldPosition);
+            float fogFactor = 1.0 - exp(-distanceToCamera * distanceToCamera * 0.000078);
+            color = mix(color, uFogColor, clamp(fogFactor, 0.0, 0.74));
+            color += (hash21(gl_FragCoord.xy) - 0.5) / 255.0;
+            gl_FragColor = vec4(color, 1.0);
+            #include <tonemapping_fragment>
+            #include <colorspace_fragment>
+          }
+        `,
+      });
+      const water = new THREE.Mesh(waterGeometry, waterMaterial);
+      water.receiveShadow = true;
+      scene.add(water);
+
+      const sandMaterial = new THREE.MeshStandardMaterial({ color: '#817159', roughness: 0.96, metalness: 0.0 });
+      const seabed = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), sandMaterial);
+      seabed.rotation.x = -Math.PI / 2;
+      seabed.position.y = -2.2;
+      seabed.receiveShadow = true;
+      scene.add(seabed);
+
+      const rockMaterial = new THREE.MeshStandardMaterial({ color: '#263a3d', roughness: 0.78, metalness: 0.06 });
+      const rockData = [
+        [-8.4, -0.15, -2.0, 2.7, 1.55, 2.1],
+        [-10.2, 0.05, 1.6, 2.1, 2.2, 1.8],
+        [8.9, -0.45, -4.2, 2.3, 1.35, 1.8],
+        [10.7, -0.65, -2.4, 1.5, 1.0, 1.4],
+        [-4.8, -1.0, 8.4, 1.6, 1.15, 1.7],
+      ];
+      for (const [x, y, z, sx, sy, sz] of rockData) {
+        const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(1, 1), rockMaterial);
+        rock.position.set(x, y, z);
+        rock.scale.set(sx, sy, sz);
+        rock.rotation.set(Math.random() * 0.45, Math.random() * Math.PI, Math.random() * 0.25);
+        rock.castShadow = true;
+        rock.receiveShadow = true;
+        scene.add(rock);
+      }
+
+      const buoy = new THREE.Group();
+      const buoyBody = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.55, 1.05, 24), new THREE.MeshStandardMaterial({ color: '#ed552f', roughness: 0.34, metalness: 0.12 }));
+      buoyBody.castShadow = true;
+      const buoyStripe = new THREE.Mesh(new THREE.CylinderGeometry(0.425, 0.515, 0.18, 24), new THREE.MeshStandardMaterial({ color: '#ece8d4', roughness: 0.32 }));
+      const buoyPole = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 1.25, 12), new THREE.MeshStandardMaterial({ color: '#3c4546', metalness: 0.65, roughness: 0.28 }));
+      buoyStripe.position.y = 0.12;
+      buoyPole.position.y = 0.98;
+      buoy.add(buoyBody, buoyStripe, buoyPole);
+      buoy.position.set(-2.1, 0.55, 1.6);
+      scene.add(buoy);
+
+      const sunlight = new THREE.DirectionalLight('#ffe0ad', 4.0);
+      sunlight.position.copy(sunDirection).multiplyScalar(30);
+      sunlight.castShadow = true;
+      sunlight.shadow.mapSize.set(1024, 1024);
+      sunlight.shadow.camera.left = -24;
+      sunlight.shadow.camera.right = 24;
+      sunlight.shadow.camera.top = 24;
+      sunlight.shadow.camera.bottom = -24;
+      scene.add(sunlight);
+      scene.add(new THREE.HemisphereLight('#b9e8f2', '#172629', 1.35));
+
+      // The static world only needs one shadow-map update. Direct ACES output also
+      // removes three full-screen post-processing passes and their framebuffers.
+      renderer.shadowMap.autoUpdate = false;
+      renderer.shadowMap.needsUpdate = true;
+
+      const clock = new THREE.Clock();
+      function warpedDomain(x, z, time) {
+        const firstX = Math.sin(x * 0.071 + z * 0.043 - time * 0.17);
+        const firstZ = Math.cos(x * -0.052 + z * 0.083 + time * 0.13);
+        const secondX = Math.sin(x * -0.033 + z * 0.097 + time * 0.11 + 1.7);
+        const secondZ = Math.cos(x * 0.089 + z * 0.027 - time * 0.09 + 2.4);
+        return [x + firstX * 0.43 + secondX * 0.21, z + firstZ * 0.43 + secondZ * 0.21];
+      }
+
+      function packetEnvelope(x, z, wave, time) {
+        const across = -wave.z * x + wave.x * z;
+        const obliqueX = wave.x + 0.37;
+        const obliqueZ = wave.z - 0.21;
+        const inverseLength = 1 / Math.hypot(obliqueX, obliqueZ);
+        const oblique = (obliqueX * x + obliqueZ * z) * inverseLength;
+        const packet = 0.84
+          + 0.13 * Math.sin(across * 0.103 + wave.phase * 1.37 - time * 0.078)
+          + 0.09 * Math.sin(oblique * 0.047 - wave.phase * 0.71 + time * 0.035);
+        return Math.min(1.16, Math.max(0.62, packet));
+      }
+
+      function sampleWaveHeight(x, z, time) {
+        const [warpedX, warpedZ] = warpedDomain(x, z, time);
+        let height = 0;
+        let slopeX = 0;
+        let slopeZ = 0;
+        for (const wave of waveSpectrum) {
+          const waveNumber = Math.PI * 2 / wave.wavelength;
+          const frequency = Math.sqrt(9.81 * waveNumber) * wave.speed;
+          const amplitude = wave.amplitude * packetEnvelope(x, z, wave, time);
+          const phase = waveNumber * (wave.x * warpedX + wave.z * warpedZ) - frequency * time + wave.phase;
+          height += amplitude * Math.sin(phase);
+          const slope = amplitude * waveNumber * Math.cos(phase);
+          slopeX += wave.x * slope;
+          slopeZ += wave.z * slope;
+        }
+        return { height, slopeX, slopeZ };
+      }
+
+      const worldUp = new THREE.Vector3(0, 1, 0);
+      const buoyNormal = new THREE.Vector3();
+      const buoyTargetRotation = new THREE.Quaternion();
+      let previousFrameTime = performance.now();
+      let averageFrameTime = 16.7;
+      let lastResolutionAdjustment = previousFrameTime;
+
+      function adaptResolution(now) {
+        const frameTime = Math.min(now - previousFrameTime, 50);
+        previousFrameTime = now;
+        if (frameTime > 0) averageFrameTime += (frameTime - averageFrameTime) * 0.045;
+        if (now - lastResolutionAdjustment < 1800) return;
+        lastResolutionAdjustment = now;
+
+        let nextDpr = renderDpr;
+        if (averageFrameTime > 20.5) nextDpr = Math.max(0.8, renderDpr - 0.12);
+        else if (averageFrameTime < 14.5) nextDpr = Math.min(dprCeiling, renderDpr + 0.08);
+        if (Math.abs(nextDpr - renderDpr) > 0.01) {
+          renderDpr = nextDpr;
+          renderer.setPixelRatio(renderDpr);
+          renderer.setSize(innerWidth, innerHeight, false);
+        }
+      }
+
+      function animate(now) {
+        const time = clock.getElapsedTime();
+        waterUniforms.uTime.value = time;
+        sky.position.copy(camera.position);
+        const buoyWave = sampleWaveHeight(-2.1, 1.6, time);
+        buoy.position.y = buoyWave.height + 0.38;
+        buoyNormal.set(-buoyWave.slopeX, 1, -buoyWave.slopeZ).normalize();
+        buoyTargetRotation.setFromUnitVectors(worldUp, buoyNormal);
+        buoy.quaternion.slerp(buoyTargetRotation, 0.065);
+        controls.update();
+        adaptResolution(now);
+        renderer.render(scene, camera);
+      }
+      renderer.setAnimationLoop(animate);
+
+      addEventListener('resize', () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      });
+    </script>
+  </body>
+</html>

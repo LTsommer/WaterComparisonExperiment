@@ -1,0 +1,1148 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Three.js Extreme Ocean</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --glass: rgba(4, 16, 27, 0.7);
+        --line: rgba(163, 222, 235, 0.19);
+        --muted: #9ab8c1;
+        --accent: #74e9df;
+      }
+      * { box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; }
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: #020a11;
+        color: #edfaff;
+        font: 12px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      canvas { display: block; width: 100%; height: 100%; }
+      button { font: inherit; }
+      .panel {
+        position: fixed;
+        z-index: 4;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: linear-gradient(145deg, rgba(5, 20, 33, 0.83), rgba(7, 31, 41, 0.56));
+        box-shadow: 0 18px 80px rgba(0, 0, 0, 0.32);
+        backdrop-filter: blur(16px) saturate(1.2);
+        -webkit-backdrop-filter: blur(16px) saturate(1.2);
+      }
+      .identity { top: 22px; left: 24px; padding: 14px 17px 13px; pointer-events: none; }
+      .identity strong { display: block; font-size: 15px; letter-spacing: 0.14em; }
+      .identity span { color: var(--muted); letter-spacing: 0.025em; }
+      .identity .eyebrow { margin-bottom: 2px; color: var(--accent); font-size: 9px; letter-spacing: 0.2em; }
+      .quality { left: 24px; bottom: 22px; padding: 11px; }
+      .quality-label { margin: 0 5px 8px; color: var(--muted); font-size: 10px; letter-spacing: 0.12em; }
+      .quality-row { display: flex; gap: 5px; }
+      .quality button {
+        min-width: 68px;
+        padding: 7px 10px;
+        border: 1px solid rgba(164, 219, 230, 0.13);
+        border-radius: 8px;
+        color: #9fb9c1;
+        background: rgba(2, 11, 18, 0.48);
+        cursor: pointer;
+        transition: 150ms ease;
+      }
+      .quality button:hover { color: white; border-color: rgba(116, 233, 223, 0.36); }
+      .quality button.active {
+        color: #051a20;
+        border-color: transparent;
+        background: linear-gradient(135deg, #a7f7ef, #5ed5d7);
+        box-shadow: 0 0 23px rgba(83, 222, 215, 0.18);
+      }
+      .stats { top: 22px; right: 24px; width: 164px; padding: 12px 14px; pointer-events: none; }
+      .stats-header { display: flex; justify-content: space-between; margin-bottom: 7px; color: var(--muted); font-size: 9px; letter-spacing: 0.15em; }
+      .live { color: #7be5da; }
+      .live::before { content: ""; display: inline-block; width: 5px; height: 5px; margin: 0 6px 1px 0; border-radius: 50%; background: #7be5da; box-shadow: 0 0 10px #7be5da; }
+      .metric { display: flex; justify-content: space-between; gap: 15px; color: #9eb9c1; font-variant-numeric: tabular-nums; }
+      .metric b { color: #e8f8fa; font-weight: 530; }
+      .hint { position: fixed; right: 25px; bottom: 22px; z-index: 3; color: rgba(214, 239, 244, 0.68); text-align: right; text-shadow: 0 2px 12px #000; pointer-events: none; }
+      .loading {
+        position: fixed; inset: 0; z-index: 10; display: grid; place-items: center;
+        background: radial-gradient(circle at 50% 43%, #0b2735, #02070d 72%);
+        transition: opacity 600ms ease, visibility 600ms ease;
+      }
+      .loading.hidden { opacity: 0; visibility: hidden; }
+      .loading-inner { text-align: center; letter-spacing: 0.12em; color: #c7e7ec; }
+      .loading-line { width: 180px; height: 1px; margin: 16px auto 0; overflow: hidden; background: rgba(170, 229, 237, 0.15); }
+      .loading-line::after { content: ""; display: block; width: 55%; height: 100%; background: #7ce6dc; animation: scan 1.1s ease-in-out infinite alternate; }
+      @keyframes scan { from { transform: translateX(-100%); } to { transform: translateX(180%); } }
+      @media (max-width: 700px) {
+        .identity { top: 12px; left: 12px; }
+        .identity span { display: none; }
+        .stats { top: 12px; right: 12px; width: 146px; }
+        .quality { left: 12px; bottom: 12px; }
+        .quality button { min-width: auto; }
+        .hint { right: 13px; bottom: 13px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="loading" id="loading"><div class="loading-inner">BUILDING OCEAN<div class="loading-line"></div></div></div>
+    <div class="panel identity">
+      <div class="eyebrow">REAL-TIME OCEAN LAB / EXTREME</div>
+      <strong>NORTH ATLANTIC · 06:42</strong>
+      <span>非周期波谱 · 平面反射折射 · 体积吸收 · 动态碎浪</span>
+    </div>
+    <div class="panel quality">
+      <div class="quality-label">RENDER QUALITY</div>
+      <div class="quality-row">
+        <button data-quality="performance">流畅</button>
+        <button data-quality="high">高</button>
+        <button data-quality="cinematic">极致</button>
+      </div>
+    </div>
+      <div class="panel stats">
+        <div class="stats-header"><span>PERFORMANCE</span><span class="live">LIVE</span></div>
+        <div class="metric"><span>LOAD</span><b id="load">--</b></div>
+        <div class="metric"><span>FPS</span><b id="fps">--</b></div>
+      <div class="metric"><span>FRAME</span><b id="frame">-- ms</b></div>
+      <div class="metric"><span>TRIANGLES</span><b id="triangles">--</b></div>
+      <div class="metric"><span>PIXEL RATIO</span><b id="dpr">--</b></div>
+      <div class="metric"><span>REFLECTION</span><b id="reflection">--</b></div>
+    </div>
+    <div class="hint">拖拽环视 · 滚轮推拉 · 右键平移<br />数字键 1 / 2 / 3 切换画质</div>
+
+    <script type="importmap">
+      { "imports": { "three": "https://unpkg.com/three@0.180.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.180.0/examples/jsm/" } }
+    </script>
+    <script type="module">
+      import * as THREE from 'three';
+      import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+      import { createRuggedRock } from './rocks.js';
+
+      const isCoarsePointer = matchMedia('(pointer: coarse)').matches;
+      const renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: false,
+        stencil: false,
+        depth: true,
+        powerPreference: 'high-performance',
+      });
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.05;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      // Count all scene, reflection and refraction passes in the HUD instead of
+      // reporting only the final render call.
+      renderer.info.autoReset = false;
+      document.body.insertBefore(renderer.domElement, document.body.firstChild);
+
+      // Each user-facing quality mode has a small set of runtime fallback tiers.
+      // Tier 0 preserves the requested visual target. The governor only steps down
+      // after sustained over-budget frames, then restores detail much more slowly.
+      // This mirrors the Unity version: shed the most expensive off-screen work
+      // first instead of allowing a laptop to stutter at a fixed 2x DPR.
+      const qualityProfiles = {
+        performance: {
+          label: '流畅',
+          tiers: [
+            { dpr: 1.08, minDpr: 0.84, rtScale: 0.34, maxRT: 960, geometry: 'performance', reflectRate: 2, refractRate: 3, shaderQuality: 0, waveCount: 6, microWaveCount: 3, staggerCaptures: true, targetFrame: 22.2 },
+            { dpr: 0.92, minDpr: 0.78, rtScale: 0.28, maxRT: 768, geometry: 'performance', reflectRate: 3, refractRate: 4, shaderQuality: 0, waveCount: 6, microWaveCount: 3, staggerCaptures: true, targetFrame: 22.2 },
+          ],
+        },
+        high: {
+          label: '高',
+          tiers: [
+            { dpr: 1.48, minDpr: 0.90, rtScale: 0.52, maxRT: 1440, geometry: 'high', reflectRate: 1, refractRate: 2, shaderQuality: 1, waveCount: 9, microWaveCount: 5, staggerCaptures: true, targetFrame: 17.5 },
+            { dpr: 1.28, minDpr: 0.84, rtScale: 0.44, maxRT: 1280, geometry: 'performance', reflectRate: 2, refractRate: 2, shaderQuality: 1, waveCount: 9, microWaveCount: 5, staggerCaptures: true, targetFrame: 17.5 },
+            { dpr: 1.06, minDpr: 0.78, rtScale: 0.36, maxRT: 960, geometry: 'performance', reflectRate: 2, refractRate: 3, shaderQuality: 0, waveCount: 6, microWaveCount: 3, staggerCaptures: true, targetFrame: 17.5 },
+          ],
+        },
+        cinematic: {
+          label: '极致',
+          tiers: [
+            // The top tier keeps its 2x-DPR, 2048-pixel capture budget and full
+            // shader. It alternates the two off-screen captures so a frame never
+            // pays for reflection + refraction + final scene all at once.
+            { dpr: 2.00, minDpr: 1.08, rtScale: 0.72, maxRT: 2048, geometry: 'cinematic', reflectRate: 1, refractRate: 1, shaderQuality: 2, waveCount: 12, microWaveCount: 6, staggerCaptures: true, targetFrame: 18.5 },
+            { dpr: 1.72, minDpr: 0.96, rtScale: 0.62, maxRT: 1600, geometry: 'cinematic', reflectRate: 1, refractRate: 2, shaderQuality: 1, waveCount: 10, microWaveCount: 5, staggerCaptures: true, targetFrame: 18.5 },
+            { dpr: 1.45, minDpr: 0.88, rtScale: 0.50, maxRT: 1280, geometry: 'high', reflectRate: 2, refractRate: 2, shaderQuality: 1, waveCount: 9, microWaveCount: 5, staggerCaptures: true, targetFrame: 18.5 },
+            { dpr: 1.20, minDpr: 0.78, rtScale: 0.40, maxRT: 1024, geometry: 'high', reflectRate: 2, refractRate: 3, shaderQuality: 0, waveCount: 6, microWaveCount: 3, staggerCaptures: true, targetFrame: 18.5 },
+          ],
+        },
+      };
+      const requestedQuality = new URLSearchParams(location.search).get('quality');
+      // Open on the balanced high preset so merely loading the page cannot pin
+      // a laptop GPU. The full cinematic path remains one click (or ?quality=cinematic)
+      // away and uses the exact same scene and materials at higher resolution.
+      let activeQuality = qualityProfiles[requestedQuality]
+        ? requestedQuality
+        : (isCoarsePointer ? 'performance' : 'high');
+      let quality = qualityProfiles[activeQuality];
+      let runtimeTier = 0;
+      let runtimeQuality = quality.tiers[runtimeTier];
+      let renderDpr = Math.min(devicePixelRatio, runtimeQuality.dpr);
+      renderer.setPixelRatio(renderDpr);
+
+      const scene = new THREE.Scene();
+      const atmosphereColor = new THREE.Color('#5e8794');
+      const refractionBackground = new THREE.Color('#193b40');
+      scene.background = new THREE.Color('#071722');
+      scene.fog = new THREE.FogExp2(atmosphereColor, 0.0064);
+
+      const camera = new THREE.PerspectiveCamera(47, innerWidth / innerHeight, 0.08, 500);
+      camera.position.set(12.4, 5.15, 15.2);
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.target.set(-0.2, 0.05, -0.8);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.048;
+      controls.minDistance = 5.5;
+      controls.maxDistance = 35;
+      controls.minPolarAngle = 0.12;
+      controls.maxPolarAngle = Math.PI * 0.475;
+
+      const sunDirection = new THREE.Vector3(-0.47, 0.44, -0.765).normalize();
+      const skyUniforms = {
+        uSunDirection: { value: sunDirection },
+        uCameraAltitude: { value: camera.position.y },
+      };
+      const skyMaterial = new THREE.ShaderMaterial({
+        side: THREE.BackSide,
+        depthWrite: false,
+        fog: false,
+        uniforms: skyUniforms,
+        vertexShader: /* glsl */`
+          varying vec3 vDirection;
+          void main() {
+            vDirection = normalize((modelMatrix * vec4(position, 0.0)).xyz);
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: /* glsl */`
+          uniform vec3 uSunDirection;
+          varying vec3 vDirection;
+          const float PI = 3.14159265359;
+
+          float hash12(vec2 p) {
+            vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+            p3 += dot(p3, p3.yzx + 33.33);
+            return fract((p3.x + p3.y) * p3.z);
+          }
+
+          float noise(vec2 p) {
+            vec2 i = floor(p), f = fract(p);
+            f = f * f * (3.0 - 2.0 * f);
+            return mix(mix(hash12(i), hash12(i + vec2(1, 0)), f.x),
+                       mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1, 1)), f.x), f.y);
+          }
+
+          void main() {
+            vec3 direction = normalize(vDirection);
+            float y = clamp(direction.y, -0.12, 1.0);
+            float horizonAmount = pow(1.0 - max(y, 0.0), 2.25);
+            float belowHorizon = smoothstep(0.04, -0.08, y);
+            vec3 zenith = vec3(0.012, 0.060, 0.125);
+            vec3 horizon = vec3(0.48, 0.655, 0.69);
+            vec3 sky = mix(zenith, horizon, horizonAmount);
+
+            float mu = max(dot(direction, uSunDirection), 0.0);
+            float mie = pow(mu, 18.0) * 0.34 + pow(mu, 160.0) * 2.2;
+            float disk = smoothstep(0.99994, 0.999982, mu);
+            sky += mie * vec3(1.0, 0.45, 0.16);
+            sky += disk * vec3(18.0, 10.0, 4.1);
+
+            // Thin, wind-stretched dawn clouds. They are deliberately low contrast
+            // so the reflection reads as sky, not as a painted texture.
+            vec2 cloudUV = direction.xz / max(direction.y + 0.28, 0.09);
+            float cloud = noise(cloudUV * vec2(0.34, 1.12) + vec2(3.7, 0.2));
+            cloud += noise(cloudUV * vec2(0.71, 2.25) - vec2(1.2, 4.1)) * 0.5;
+            cloud = smoothstep(0.88, 1.18, cloud) * smoothstep(0.08, 0.45, direction.y);
+            sky = mix(sky, vec3(0.56, 0.62, 0.62), cloud * 0.24);
+            sky = mix(sky, vec3(0.18, 0.29, 0.32), belowHorizon);
+            gl_FragColor = vec4(sky, 1.0);
+            #include <tonemapping_fragment>
+            #include <colorspace_fragment>
+          }
+        `,
+      });
+      const sky = new THREE.Mesh(new THREE.SphereGeometry(260, 48, 24), skyMaterial);
+      sky.frustumCulled = false;
+      scene.add(sky);
+
+      // Prime-ish wavelengths and deliberately irrational speed multipliers keep
+      // the combined spectrum from falling into a visually recognisable loop.
+      const rawSpectrum = [
+        [ 0.993,  0.118, 0.365, 22.37, 0.17, 0.93, 0.78],
+        [ 0.932, -0.363, 0.255, 15.61, 2.41, 1.01, 0.74],
+        [ 0.801,  0.598, 0.182, 11.17, 4.83, 0.97, 0.70],
+        [ 0.514,  0.858, 0.128,  8.23, 1.36, 1.07, 0.66],
+        [-0.286,  0.958, 0.091,  6.11, 5.57, 1.11, 0.61],
+        [-0.739,  0.674, 0.066,  4.63, 3.03, 1.16, 0.57],
+        [ 0.682, -0.731, 0.047,  3.47, 0.91, 1.22, 0.51],
+        [-0.091, -0.996, 0.034,  2.71, 3.78, 1.27, 0.46],
+        [ 0.896,  0.444, 0.024,  2.03, 2.04, 1.31, 0.40],
+        [-0.574,  0.819, 0.017,  1.51, 4.31, 1.36, 0.34],
+        [ 0.331, -0.944, 0.012,  1.09, 5.92, 1.42, 0.28],
+        [-0.971, -0.239, 0.008,  0.79, 2.72, 1.49, 0.22],
+      ];
+      const waveSpectrum = rawSpectrum.map(([x, z, amplitude, wavelength, phase, speed, chop]) => {
+        const inverseLength = 1 / Math.hypot(x, z);
+        return { x: x * inverseLength, z: z * inverseLength, amplitude, wavelength, phase, speed, chop };
+      });
+
+      const waterGeometries = {
+        performance: new THREE.PlaneGeometry(170, 170, 156, 156),
+        high: new THREE.PlaneGeometry(170, 170, 224, 224),
+        cinematic: new THREE.PlaneGeometry(170, 170, 288, 288),
+      };
+      for (const geometry of Object.values(waterGeometries)) geometry.rotateX(-Math.PI / 2);
+
+      const rtType = renderer.capabilities.isWebGL2 ? THREE.HalfFloatType : THREE.UnsignedByteType;
+      const targetOptions = {
+        type: rtType,
+        format: THREE.RGBAFormat,
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+        depthBuffer: true,
+        stencilBuffer: false,
+      };
+      const reflectionTarget = new THREE.WebGLRenderTarget(16, 16, targetOptions);
+      const refractionTarget = new THREE.WebGLRenderTarget(16, 16, targetOptions);
+      const refractionDepth = new THREE.DepthTexture(16, 16, THREE.UnsignedIntType);
+      refractionDepth.format = THREE.DepthFormat;
+      refractionDepth.minFilter = THREE.NearestFilter;
+      refractionDepth.magFilter = THREE.NearestFilter;
+      refractionTarget.depthTexture = refractionDepth;
+      reflectionTarget.texture.colorSpace = THREE.LinearSRGBColorSpace;
+      refractionTarget.texture.colorSpace = THREE.LinearSRGBColorSpace;
+
+      const reflectionMatrix = new THREE.Matrix4();
+      const waterUniforms = {
+        uTime: { value: 0 },
+        uResolution: { value: new THREE.Vector2(innerWidth * renderDpr, innerHeight * renderDpr) },
+        uReflectionTexel: { value: new THREE.Vector2(1 / 16, 1 / 16) },
+        uSunDirection: { value: sunDirection },
+        uWaveData: { value: waveSpectrum.map((wave) => new THREE.Vector4(wave.x, wave.z, wave.amplitude, wave.wavelength)) },
+        uWaveMotion: { value: waveSpectrum.map((wave) => new THREE.Vector4(wave.phase, wave.speed, wave.chop, 0)) },
+        uReflectionTexture: { value: reflectionTarget.texture },
+        uRefractionTexture: { value: refractionTarget.texture },
+        uRefractionDepth: { value: refractionDepth },
+        uReflectionMatrix: { value: reflectionMatrix },
+        uCameraNear: { value: camera.near },
+        uCameraFar: { value: camera.far },
+        uAbsorption: { value: new THREE.Vector3(0.49, 0.128, 0.052) },
+        uDeepScatter: { value: new THREE.Color('#075a68') },
+        uAtmosphere: { value: atmosphereColor },
+        uShaderQuality: { value: runtimeQuality.shaderQuality },
+        uWaveCount: { value: runtimeQuality.waveCount },
+        uMicroWaveCount: { value: runtimeQuality.microWaveCount },
+        uRockData: { value: [
+          new THREE.Vector4(-8.8, -2.1, 2.7, 0),
+          new THREE.Vector4(8.7, -4.2, 2.2, 1.7),
+          new THREE.Vector4(-4.7, 8.3, 1.55, 3.2),
+          new THREE.Vector4(10.8, -1.7, 1.35, 4.8),
+        ] },
+      };
+
+      const waterMaterial = new THREE.ShaderMaterial({
+        uniforms: waterUniforms,
+        side: THREE.FrontSide,
+        depthWrite: true,
+        depthTest: true,
+        fog: false,
+        extensions: { derivatives: true },
+        vertexShader: /* glsl */`
+          uniform float uTime;
+          uniform mat4 uReflectionMatrix;
+          const int WAVE_COUNT = 12;
+          const float TAU = 6.28318530718;
+          uniform int uWaveCount;
+          uniform vec4 uWaveData[WAVE_COUNT];
+          uniform vec4 uWaveMotion[WAVE_COUNT];
+          varying vec3 vWorldPosition;
+          varying vec3 vWorldNormal;
+          varying vec4 vReflectionCoord;
+          varying vec4 vScreenCoord;
+          varying float vViewDepth;
+          varying float vCompression;
+          varying float vCrest;
+          varying float vWaveEnergy;
+
+          vec2 domainWarp(vec2 p, float time) {
+            vec2 macro = vec2(
+              sin(dot(p, vec2(0.0527, 0.0311)) - time * 0.119),
+              cos(dot(p, vec2(-0.0383, 0.0679)) + time * 0.087)
+            );
+            vec2 cross = vec2(
+              sin(dot(p, vec2(-0.0219, 0.0863)) + time * 0.071 + 1.83),
+              cos(dot(p, vec2(0.0781, 0.0197)) - time * 0.064 + 4.11)
+            );
+            return p + macro * 0.62 + cross * 0.31;
+          }
+
+          float packetEnvelope(vec2 p, vec2 direction, float seed, float time) {
+            vec2 across = vec2(-direction.y, direction.x);
+            vec2 diagonal = normalize(direction + vec2(0.311, -0.217));
+            float first = sin(dot(p, across) * 0.0713 + seed * 1.71 - time * 0.0527);
+            float second = sin(dot(p, diagonal) * 0.0391 - seed * 0.83 + time * 0.0319);
+            float third = cos(dot(p, vec2(0.0571, -0.0427)) + seed * 2.17 - time * 0.021);
+            return clamp(0.86 + first * 0.12 + second * 0.085 + third * 0.045, 0.60, 1.19);
+          }
+
+          void main() {
+            vec3 displaced = position;
+            vec3 tangent = vec3(1.0, 0.0, 0.0);
+            vec3 binormal = vec3(0.0, 0.0, 1.0);
+            vec2 warped = domainWarp(position.xz, uTime);
+            float jacobianXX = 1.0;
+            float jacobianXZ = 0.0;
+            float jacobianZX = 0.0;
+            float jacobianZZ = 1.0;
+            float energy = 0.0;
+
+            for (int i = 0; i < WAVE_COUNT; i++) {
+              if (i >= uWaveCount) break;
+              vec4 wave = uWaveData[i];
+              vec4 motion = uWaveMotion[i];
+              vec2 direction = normalize(wave.xy);
+              float k = TAU / wave.w;
+              float omega = sqrt(9.81 * k) * motion.y;
+              float envelope = packetEnvelope(position.xz, direction, motion.x, uTime);
+              float amplitude = wave.z * envelope;
+              float phase = k * dot(direction, warped) - omega * uTime + motion.x;
+              float sine = sin(phase);
+              float cosine = cos(phase);
+              float qa = motion.z * amplitude;
+              float horizontalSlope = qa * k;
+              float verticalSlope = amplitude * k;
+
+              displaced.xz += direction * qa * cosine;
+              displaced.y += amplitude * sine;
+              tangent += vec3(-horizontalSlope * direction.x * direction.x * sine,
+                               verticalSlope * direction.x * cosine,
+                              -horizontalSlope * direction.x * direction.y * sine);
+              binormal += vec3(-horizontalSlope * direction.x * direction.y * sine,
+                                verticalSlope * direction.y * cosine,
+                               -horizontalSlope * direction.y * direction.y * sine);
+              jacobianXX -= horizontalSlope * direction.x * direction.x * sine;
+              jacobianXZ -= horizontalSlope * direction.x * direction.y * sine;
+              jacobianZX -= horizontalSlope * direction.y * direction.x * sine;
+              jacobianZZ -= horizontalSlope * direction.y * direction.y * sine;
+              energy += abs(verticalSlope * cosine) * min(1.0, wave.w * 0.25);
+            }
+
+            float determinant = jacobianXX * jacobianZZ - jacobianXZ * jacobianZX;
+            vec3 localNormal = normalize(cross(binormal, tangent));
+            vec4 worldPosition = modelMatrix * vec4(displaced, 1.0);
+            vWorldPosition = worldPosition.xyz;
+            vWorldNormal = normalize(mat3(modelMatrix) * localNormal);
+            vCompression = smoothstep(0.08, 0.53, 1.0 - determinant);
+            vCrest = smoothstep(0.04, 0.58, displaced.y) * smoothstep(0.16, 0.75, energy);
+            vWaveEnergy = clamp(energy * 0.28, 0.0, 1.0);
+            vReflectionCoord = uReflectionMatrix * worldPosition;
+            vec4 viewPosition = viewMatrix * worldPosition;
+            vViewDepth = -viewPosition.z;
+            gl_Position = projectionMatrix * viewPosition;
+            vScreenCoord = gl_Position;
+          }
+        `,
+        fragmentShader: /* glsl */`
+          uniform float uTime;
+          uniform vec2 uResolution;
+          uniform vec2 uReflectionTexel;
+          uniform vec3 uSunDirection;
+          uniform vec3 uAbsorption;
+          uniform vec3 uDeepScatter;
+          uniform vec3 uAtmosphere;
+          uniform float uShaderQuality;
+          uniform int uMicroWaveCount;
+          uniform sampler2D uReflectionTexture;
+          uniform sampler2D uRefractionTexture;
+          uniform sampler2D uRefractionDepth;
+          uniform float uCameraNear;
+          uniform float uCameraFar;
+          uniform vec4 uRockData[4];
+          varying vec3 vWorldPosition;
+          varying vec3 vWorldNormal;
+          varying vec4 vReflectionCoord;
+          varying vec4 vScreenCoord;
+          varying float vViewDepth;
+          varying float vCompression;
+          varying float vCrest;
+          varying float vWaveEnergy;
+          const float PI = 3.14159265359;
+          const float TAU = 6.28318530718;
+
+          float hash21(vec2 p) {
+            vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+            p3 += dot(p3, p3.yzx + 33.33);
+            return fract((p3.x + p3.y) * p3.z);
+          }
+
+          float valueNoise(vec2 p) {
+            vec2 cell = floor(p), fraction = fract(p);
+            fraction = fraction * fraction * (3.0 - 2.0 * fraction);
+            return mix(mix(hash21(cell), hash21(cell + vec2(1, 0)), fraction.x),
+                       mix(hash21(cell + vec2(0, 1)), hash21(cell + vec2(1, 1)), fraction.x), fraction.y);
+          }
+
+          float fbm(vec2 p) {
+            float sum = 0.0;
+            mat2 rotation = mat2(0.80, 0.60, -0.60, 0.80);
+            sum += valueNoise(p) * 0.52; p = rotation * p * 2.03 + 7.1;
+            sum += valueNoise(p) * 0.27; p = rotation * p * 2.07 - 3.4;
+            sum += valueNoise(p) * 0.14; p = rotation * p * 2.11 + 1.9;
+            sum += valueNoise(p) * 0.07;
+            return sum;
+          }
+
+          void capillary(inout vec2 slope, vec2 p, vec2 direction, float amplitude,
+                         float wavelength, float speed, float phaseOffset) {
+            direction = normalize(direction);
+            float k = TAU / wavelength;
+            float phase = k * dot(p, direction) - sqrt(9.81 * k) * speed * uTime + phaseOffset;
+            float pixelWidth = fwidth(phase);
+            float filterAmount = 1.0 - smoothstep(1.25, 3.25, pixelWidth);
+            slope += direction * amplitude * k * cos(phase) * filterAmount;
+          }
+
+          float smithGGX(float nDotV, float alpha) {
+            float a2 = alpha * alpha;
+            return 2.0 * nDotV / max(nDotV + sqrt(a2 + (1.0 - a2) * nDotV * nDotV), 0.0001);
+          }
+
+          float viewDepthFromBuffer(float depth) {
+            float viewZ = (uCameraNear * uCameraFar)
+              / ((uCameraFar - uCameraNear) * depth - uCameraFar);
+            return -viewZ;
+          }
+
+          vec3 sampleReflection(vec2 uv, float roughness) {
+            uv = clamp(uv, 0.002, 0.998);
+            vec3 color = texture2D(uReflectionTexture, uv).rgb;
+            if (uShaderQuality < 0.5) return color;
+            vec2 radius = uReflectionTexel * mix(0.8, 4.6, roughness);
+            vec3 ring = vec3(0.0);
+            ring += texture2D(uReflectionTexture, uv + vec2( 1.0, 0.0) * radius).rgb;
+            ring += texture2D(uReflectionTexture, uv + vec2(-1.0, 0.0) * radius).rgb;
+            ring += texture2D(uReflectionTexture, uv + vec2( 0.0, 1.0) * radius).rgb;
+            ring += texture2D(uReflectionTexture, uv + vec2( 0.0,-1.0) * radius).rgb;
+            color = color * 0.50 + ring * 0.125;
+            if (uShaderQuality < 1.5) return color;
+            vec3 diagonal = vec3(0.0);
+            diagonal += texture2D(uReflectionTexture, uv + vec2( 0.72, 0.72) * radius * 1.6).rgb;
+            diagonal += texture2D(uReflectionTexture, uv + vec2(-0.72, 0.72) * radius * 1.6).rgb;
+            diagonal += texture2D(uReflectionTexture, uv + vec2( 0.72,-0.72) * radius * 1.6).rgb;
+            diagonal += texture2D(uReflectionTexture, uv + vec2(-0.72,-0.72) * radius * 1.6).rgb;
+            return color * 0.68 + diagonal * 0.08;
+          }
+
+          float shorelineFoam(vec2 p) {
+            if (uShaderQuality < 0.5) return 0.0;
+            float foam = 0.0;
+            for (int i = 0; i < 4; i++) {
+              if (uShaderQuality < 1.5 && i >= 2) break;
+              vec4 rock = uRockData[i];
+              float distanceToRock = length(p - rock.xy);
+              float ring = abs(distanceToRock - rock.z - sin(uTime * 0.73 + rock.w) * 0.08);
+              float edge = 1.0 - smoothstep(0.025, 0.27, ring);
+              float angularBreakup = uShaderQuality < 1.5
+                ? valueNoise(p * 1.27 + vec2(rock.w, -rock.w) - uTime * 0.035)
+                : fbm(p * 1.27 + vec2(rock.w, -rock.w) - uTime * 0.035);
+              foam = max(foam, edge * smoothstep(0.48, 0.72, angularBreakup + 0.12));
+            }
+            return foam;
+          }
+
+          void main() {
+            vec2 p = vWorldPosition.xz;
+            vec2 macroWarp = vec2(
+              sin(dot(p, vec2(0.173, 0.091)) - uTime * 0.217),
+              cos(dot(p, vec2(-0.127, 0.203)) + uTime * 0.163)
+            ) * 0.17;
+            vec2 detailPoint = p + macroWarp;
+            vec2 microSlope = vec2(0.0);
+            capillary(microSlope, detailPoint, vec2( 1.00, 0.18), 0.0100, 1.11, 1.32, 0.31);
+            capillary(microSlope, detailPoint, vec2( 0.62, 0.79), 0.0072, 0.73, 1.43, 2.17);
+            capillary(microSlope, detailPoint, vec2(-0.29, 0.96), 0.0051, 0.49, 1.55, 4.29);
+            if (uMicroWaveCount > 3) {
+              capillary(microSlope, detailPoint, vec2(-0.88, 0.47), 0.0035, 0.33, 1.68, 1.08);
+              capillary(microSlope, detailPoint, vec2( 0.71,-0.70), 0.0023, 0.221,1.81, 5.42);
+            }
+            if (uMicroWaveCount > 5) {
+              capillary(microSlope, detailPoint, vec2(-0.45,-0.89), 0.0015, 0.153,1.96, 3.11);
+            }
+
+            vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
+            vec3 normal = normalize(vWorldNormal + vec3(-microSlope.x, 0.0, -microSlope.y));
+            float nDotV = max(dot(normal, viewDirection), 0.001);
+            float nDotL = max(dot(normal, uSunDirection), 0.0);
+            float agitation = clamp(length(microSlope) * 1.55 + vWaveEnergy * 0.15, 0.0, 1.0);
+            float roughness = mix(0.045, 0.118, agitation);
+
+            // uReflectionMatrix already contains the NDC-to-UV bias matrix.
+            vec2 reflectionUV = vReflectionCoord.xy / max(vReflectionCoord.w, 0.0001);
+            vec2 screenUV = vScreenCoord.xy / max(vScreenCoord.w, 0.0001);
+            screenUV = screenUV * 0.5 + 0.5;
+            vec2 refractionOffset = normal.xz * mix(0.010, 0.025, 1.0 - nDotV);
+            refractionOffset += microSlope * 0.0015;
+
+            vec3 reflection = sampleReflection(reflectionUV + normal.xz * 0.006, roughness);
+            vec2 baseRefractionUV = clamp(screenUV, 0.003, 0.997);
+            vec2 distortedRefractionUV = clamp(screenUV + refractionOffset, 0.003, 0.997);
+            float baseSceneDepth = viewDepthFromBuffer(texture2D(uRefractionDepth, baseRefractionUV).r);
+            float distortedSceneDepth = viewDepthFromBuffer(texture2D(uRefractionDepth, distortedRefractionUV).r);
+            // Screen-space distortion must never pull a foreground rock across
+            // the water surface. Fall back to the undistorted ray whenever the
+            // displaced depth lies in front of this water fragment.
+            float distortionValid = step(vViewDepth + 0.025, distortedSceneDepth);
+            vec2 refractionUV = mix(baseRefractionUV, distortedRefractionUV, distortionValid);
+            float sceneViewDepth = mix(baseSceneDepth, distortedSceneDepth, distortionValid);
+            vec3 refractedScene = texture2D(uRefractionTexture, refractionUV).rgb;
+
+            // IOR 1.333 gives F0 = 0.02037. The scene depth buffer supplies the
+            // actual view-ray thickness, so shallow edges remain transparent
+            // while deep water receives stronger spectral extinction.
+            const float dielectricF0 = 0.02037;
+            float fresnel = dielectricF0 + (1.0 - dielectricF0) * pow(1.0 - nDotV, 5.0);
+            float opticalDepth = clamp(sceneViewDepth - vViewDepth, 0.12, 15.0);
+            vec3 transmittance = exp(-uAbsorption * opticalDepth);
+            vec3 volumeScatter = uDeepScatter * (vec3(1.0) - transmittance) * (0.68 + nDotL * 0.32);
+            vec3 body = refractedScene * transmittance + volumeScatter;
+            vec3 color = mix(body, reflection, fresnel);
+
+            // Cook-Torrance GGX sun glint, evaluated separately from planar sky
+            // reflection so the solar sparkle stays sharp at grazing angles.
+            vec3 halfVector = normalize(viewDirection + uSunDirection);
+            float nDotH = max(dot(normal, halfVector), 0.0);
+            float vDotH = max(dot(viewDirection, halfVector), 0.0);
+            float alpha = roughness * roughness;
+            float a2 = alpha * alpha;
+            float denominator = nDotH * nDotH * (a2 - 1.0) + 1.0;
+            float distribution = a2 / max(PI * denominator * denominator, 0.000001);
+            float geometry = smithGGX(nDotV, alpha) * smithGGX(max(nDotL, 0.001), alpha);
+            vec3 specularF = vec3(dielectricF0) + (vec3(1.0) - dielectricF0) * pow(1.0 - vDotH, 5.0);
+            vec3 sunSpecular = distribution * geometry * specularF
+                             / max(4.0 * nDotV * max(nDotL, 0.001), 0.001);
+            color += sunSpecular * nDotL * vec3(9.5, 5.7, 2.7);
+
+            // Foam is driven by the horizontal Gerstner Jacobian, not height.
+            // The advected anisotropic field breaks up crests into lace-like streaks.
+            vec2 wind = normalize(vec2(1.0, 0.17));
+            vec2 crossWind = vec2(-wind.y, wind.x);
+            vec2 advected = p - wind * uTime * 0.23;
+            vec2 streakUV = vec2(dot(advected, wind) * 0.47, dot(advected, crossWind) * 2.18);
+            float longStreak = uShaderQuality < 0.5 ? valueNoise(streakUV) : fbm(streakUV);
+            float cellularBreakup = uShaderQuality < 1.5
+              ? valueNoise(advected * 1.63 + vec2(4.1, -2.7))
+              : fbm(advected * 1.63 + vec2(4.1, -2.7));
+            float foamField = mix(cellularBreakup, longStreak, 0.67);
+            float crestFoam = max(vCompression * 0.86, vCrest * vCompression);
+            crestFoam *= smoothstep(0.43, 0.76, foamField + crestFoam * 0.20);
+            float rockFoam = shorelineFoam(p);
+            float foamMask = clamp(max(crestFoam, rockFoam * 0.72), 0.0, 1.0);
+            vec3 foamColor = vec3(0.73, 0.84, 0.82) * (0.78 + 0.29 * nDotL);
+            foamColor += reflection * 0.12;
+            color = mix(color, foamColor, foamMask * 0.76);
+
+            float cameraDistance = length(cameraPosition - vWorldPosition);
+            float fog = 1.0 - exp(-cameraDistance * cameraDistance * 0.000044);
+            color = mix(color, uAtmosphere, clamp(fog, 0.0, 0.72));
+            color += (hash21(gl_FragCoord.xy + fract(uTime) * 67.0) - 0.5) / 255.0;
+            gl_FragColor = vec4(color, 1.0);
+            #include <tonemapping_fragment>
+            #include <colorspace_fragment>
+          }
+        `,
+      });
+
+      const water = new THREE.Mesh(waterGeometries[runtimeQuality.geometry], waterMaterial);
+      water.receiveShadow = true;
+      water.renderOrder = 2;
+      scene.add(water);
+
+      const seabedUniforms = {
+        uTime: waterUniforms.uTime,
+        uSunDirection: { value: sunDirection },
+      };
+      const seabed = new THREE.Mesh(
+        new THREE.PlaneGeometry(180, 180, 1, 1),
+        new THREE.ShaderMaterial({
+          uniforms: seabedUniforms,
+          vertexShader: /* glsl */`
+            varying vec3 vWorldPosition;
+            void main() {
+              vec4 world = modelMatrix * vec4(position, 1.0);
+              vWorldPosition = world.xyz;
+              gl_Position = projectionMatrix * viewMatrix * world;
+            }
+          `,
+          fragmentShader: /* glsl */`
+            uniform float uTime;
+            uniform vec3 uSunDirection;
+            varying vec3 vWorldPosition;
+            float hash21(vec2 p) {
+              vec3 p3 = fract(vec3(p.xyx) * .1031);
+              p3 += dot(p3, p3.yzx + 33.33);
+              return fract((p3.x + p3.y) * p3.z);
+            }
+            float noise(vec2 p) {
+              vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+              return mix(mix(hash21(i),hash21(i+vec2(1,0)),f.x),mix(hash21(i+vec2(0,1)),hash21(i+vec2(1,1)),f.x),f.y);
+            }
+            void main() {
+              vec2 p = vWorldPosition.xz;
+              float grain = noise(p * 3.2) * 0.055 + noise(p * 12.7) * 0.018;
+              vec2 causticP = p * 1.11 + vec2(uTime * 0.12, -uTime * 0.08);
+              float c1 = abs(sin(causticP.x + sin(causticP.y * 1.43)));
+              float c2 = abs(sin(causticP.y * 1.17 - sin(causticP.x * 1.31)));
+              float caustic = pow(max(0.0, 1.0 - abs(c1 - c2)), 12.0) * 0.25;
+              vec3 sand = vec3(0.255, 0.245, 0.191) + grain;
+              sand += caustic * vec3(0.30, 0.42, 0.36);
+              gl_FragColor = vec4(sand, 1.0);
+            }
+          `,
+        })
+      );
+      seabed.rotation.x = -Math.PI / 2;
+      seabed.position.y = -2.65;
+      seabed.receiveShadow = true;
+      scene.add(seabed);
+
+      const rockSpecs = [
+        { seed: 19, position: [-8.8, -0.78, -2.1], scale: [2.75, 2.25, 2.18], rotation: [0.08, 0.52, -0.06] },
+        { seed: 73, position: [-11.4, -1.08, 1.35], scale: [1.72, 1.78, 1.52], rotation: [-0.09, 1.41, 0.14] },
+        { seed: 37, position: [8.7, -1.18, -4.2], scale: [2.25, 1.78, 2.05], rotation: [0.12, 2.18, -0.11] },
+        { seed: 91, position: [10.8, -1.34, -1.7], scale: [1.38, 1.24, 1.52], rotation: [-0.15, 0.77, 0.09] },
+        { seed: 53, position: [-4.7, -1.48, 8.3], scale: [1.64, 1.42, 1.77], rotation: [0.14, 2.82, 0.06] },
+        { seed: 113, position: [4.2, -2.03, 7.7], scale: [1.18, 0.86, 1.31], rotation: [0.07, 1.93, -0.04] },
+      ];
+      const rocks = [];
+      for (const spec of rockSpecs) {
+        const rock = createRuggedRock(THREE, {
+          seed: spec.seed,
+          radius: 1,
+          detail: 4,
+          color: 0x3b4949,
+          wetColor: 0x111f22,
+        });
+        rock.position.set(...spec.position);
+        rock.scale.set(...spec.scale);
+        rock.rotation.set(...spec.rotation);
+        rock.traverse((object) => {
+          if (object.isMesh) {
+            object.castShadow = true;
+            object.receiveShadow = true;
+          }
+        });
+        rocks.push(rock);
+        scene.add(rock);
+      }
+
+      function standardMaterial(color, roughness, metalness = 0) {
+        return new THREE.MeshStandardMaterial({ color, roughness, metalness });
+      }
+      const buoy = new THREE.Group();
+      buoy.name = 'Weather buoy';
+      const buoyOrange = standardMaterial('#e54b28', 0.31, 0.08);
+      const buoyWhite = standardMaterial('#dfdfd2', 0.38, 0.02);
+      const buoyMetal = standardMaterial('#293436', 0.24, 0.72);
+      const buoyBody = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.57, 1.02, 32, 2), buoyOrange);
+      const lowerRing = new THREE.Mesh(new THREE.TorusGeometry(0.525, 0.075, 10, 32), buoyOrange);
+      const stripe = new THREE.Mesh(new THREE.CylinderGeometry(0.455, 0.505, 0.205, 32), buoyWhite);
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.048, 0.055, 1.42, 12), buoyMetal);
+      const radar = new THREE.Mesh(new THREE.BoxGeometry(0.49, 0.075, 0.075), buoyWhite);
+      const beaconBase = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, 0.16, 16), buoyMetal);
+      const beaconMaterial = new THREE.MeshPhysicalMaterial({ color: '#9c180e', emissive: '#e12512', emissiveIntensity: 0.35, roughness: 0.12, transmission: 0.14, thickness: 0.08 });
+      const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.09, 16, 10), beaconMaterial);
+      lowerRing.rotation.x = Math.PI / 2;
+      lowerRing.position.y = -0.43;
+      stripe.position.y = 0.11;
+      pole.position.y = 1.16;
+      radar.position.y = 1.63;
+      radar.rotation.y = 0.45;
+      beaconBase.position.y = 1.73;
+      beacon.position.y = 1.86;
+      buoy.add(buoyBody, lowerRing, stripe, pole, radar, beaconBase, beacon);
+      buoy.traverse((object) => { if (object.isMesh) object.castShadow = true; });
+      const buoyAnchor = new THREE.Vector2(-2.25, 1.55);
+      buoy.position.set(buoyAnchor.x, 0.38, buoyAnchor.y);
+      scene.add(buoy);
+
+      const sunlight = new THREE.DirectionalLight('#ffd6a0', 4.25);
+      sunlight.position.copy(sunDirection).multiplyScalar(34);
+      sunlight.castShadow = true;
+      sunlight.shadow.mapSize.set(2048, 2048);
+      sunlight.shadow.camera.left = -27;
+      sunlight.shadow.camera.right = 27;
+      sunlight.shadow.camera.top = 27;
+      sunlight.shadow.camera.bottom = -27;
+      sunlight.shadow.camera.near = 0.5;
+      sunlight.shadow.camera.far = 90;
+      sunlight.shadow.bias = -0.00025;
+      scene.add(sunlight);
+      scene.add(new THREE.HemisphereLight('#a7d8e3', '#152327', 1.42));
+
+      const mirrorCamera = new THREE.PerspectiveCamera();
+      const mirrorPosition = new THREE.Vector3();
+      const mirrorTarget = new THREE.Vector3();
+      // Reused during reflection capture; avoid allocating a Vector3 each capture frame.
+      const savedSkyPosition = new THREE.Vector3();
+      const mirrorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      const mirrorPlaneInCameraSpace = new THREE.Plane();
+      const clipPlane = new THREE.Vector4();
+      const q = new THREE.Vector4();
+      const biasMatrix = new THREE.Matrix4().set(
+        0.5, 0.0, 0.0, 0.5,
+        0.0, 0.5, 0.0, 0.5,
+        0.0, 0.0, 0.5, 0.5,
+        0.0, 0.0, 0.0, 1.0
+      );
+
+      function updateMirrorCamera() {
+        mirrorPosition.copy(camera.position);
+        mirrorPosition.y *= -1;
+        mirrorTarget.copy(controls.target);
+        mirrorTarget.y *= -1;
+        mirrorCamera.position.copy(mirrorPosition);
+        mirrorCamera.up.copy(camera.up);
+        mirrorCamera.up.y *= -1;
+        mirrorCamera.lookAt(mirrorTarget);
+        mirrorCamera.near = camera.near;
+        mirrorCamera.far = camera.far;
+        mirrorCamera.aspect = camera.aspect;
+        mirrorCamera.projectionMatrix.copy(camera.projectionMatrix);
+        mirrorCamera.updateMatrixWorld();
+        mirrorCamera.matrixWorldInverse.copy(mirrorCamera.matrixWorld).invert();
+
+        // Oblique near plane removes geometry below the water from the reflection.
+        mirrorPlaneInCameraSpace.copy(mirrorPlane).applyMatrix4(mirrorCamera.matrixWorldInverse);
+        clipPlane.set(
+          mirrorPlaneInCameraSpace.normal.x,
+          mirrorPlaneInCameraSpace.normal.y,
+          mirrorPlaneInCameraSpace.normal.z,
+          mirrorPlaneInCameraSpace.constant,
+        );
+        const projection = mirrorCamera.projectionMatrix;
+        const elements = projection.elements;
+        q.x = (Math.sign(clipPlane.x) + elements[8]) / elements[0];
+        q.y = (Math.sign(clipPlane.y) + elements[9]) / elements[5];
+        q.z = -1;
+        q.w = (1 + elements[10]) / elements[14];
+        const clipDot = clipPlane.dot(q);
+        const safeClipDot = Math.abs(clipDot) < 0.0001 ? (clipDot < 0 ? -0.0001 : 0.0001) : clipDot;
+        clipPlane.multiplyScalar(2 / safeClipDot);
+        elements[2] = clipPlane.x;
+        elements[6] = clipPlane.y;
+        elements[10] = clipPlane.z + 1.0 - 0.001;
+        elements[14] = clipPlane.w;
+        reflectionMatrix.copy(biasMatrix).multiply(mirrorCamera.projectionMatrix).multiply(mirrorCamera.matrixWorldInverse);
+      }
+
+      function renderReflection() {
+        updateMirrorCamera();
+        const previousWaterVisible = water.visible;
+        const previousSeabedVisible = seabed.visible;
+        savedSkyPosition.copy(sky.position);
+        const oldTarget = renderer.getRenderTarget();
+        water.visible = false;
+        seabed.visible = false;
+        sky.position.copy(mirrorCamera.position);
+        try {
+          renderer.setRenderTarget(reflectionTarget);
+          renderer.setClearColor('#0a202c', 1);
+          renderer.clear();
+          renderer.render(scene, mirrorCamera);
+        } finally {
+          renderer.setRenderTarget(oldTarget);
+          water.visible = previousWaterVisible;
+          seabed.visible = previousSeabedVisible;
+          sky.position.copy(savedSkyPosition);
+        }
+      }
+
+      function renderRefraction() {
+        const previousWaterVisible = water.visible;
+        const previousSkyVisible = sky.visible;
+        const previousBuoyVisible = buoy.visible;
+        const oldBackground = scene.background;
+        const oldTarget = renderer.getRenderTarget();
+        water.visible = false;
+        sky.visible = false;
+        buoy.visible = false;
+        scene.background = refractionBackground;
+        try {
+          renderer.setRenderTarget(refractionTarget);
+          renderer.setClearColor('#193b40', 1);
+          renderer.clear();
+          renderer.render(scene, camera);
+        } finally {
+          renderer.setRenderTarget(oldTarget);
+          scene.background = oldBackground;
+          water.visible = previousWaterVisible;
+          sky.visible = previousSkyVisible;
+          buoy.visible = previousBuoyVisible;
+        }
+      }
+
+      function resizeRenderTargets() {
+        const requestedWidth = Math.max(256, Math.round(innerWidth * renderDpr * runtimeQuality.rtScale));
+        const requestedHeight = Math.max(144, Math.round(innerHeight * renderDpr * runtimeQuality.rtScale));
+        // Preserve the source aspect ratio while applying the longest-edge cap.
+        // Clamping width and height independently wastes pixels and can stretch
+        // projected reflection coordinates on unusually large displays.
+        const capScale = Math.min(1, runtimeQuality.maxRT / Math.max(requestedWidth, requestedHeight));
+        const targetWidth = Math.max(256, Math.round(requestedWidth * capScale));
+        const targetHeight = Math.max(144, Math.round(requestedHeight * capScale));
+        reflectionTarget.setSize(targetWidth, targetHeight);
+        refractionTarget.setSize(targetWidth, targetHeight);
+        waterUniforms.uReflectionTexel.value.set(1 / targetWidth, 1 / targetHeight);
+        document.getElementById('reflection').textContent = targetWidth + '×' + targetHeight;
+        reflectionPrimed = false;
+        refractionPrimed = false;
+        staggerReflectionNext = true;
+      }
+
+      function updateLoadMetric() {
+        const mode = runtimeTier === 0 ? 'MAX' : 'AUTO −' + runtimeTier;
+        document.getElementById('load').textContent = quality.label + ' · ' + mode;
+      }
+
+      function applyRuntimeTier({ resetDpr = false } = {}) {
+        runtimeQuality = quality.tiers[runtimeTier];
+        const dprCeiling = Math.min(devicePixelRatio, runtimeQuality.dpr);
+        renderDpr = resetDpr ? dprCeiling : Math.min(renderDpr, dprCeiling);
+        renderer.setPixelRatio(renderDpr);
+        renderer.setSize(innerWidth, innerHeight, false);
+        water.geometry = waterGeometries[runtimeQuality.geometry];
+        waterUniforms.uShaderQuality.value = runtimeQuality.shaderQuality;
+        waterUniforms.uWaveCount.value = runtimeQuality.waveCount;
+        waterUniforms.uMicroWaveCount.value = runtimeQuality.microWaveCount;
+        waterUniforms.uResolution.value.set(innerWidth * renderDpr, innerHeight * renderDpr);
+        resizeRenderTargets();
+        updateLoadMetric();
+      }
+
+      function setQuality(name) {
+        if (!qualityProfiles[name]) return;
+        activeQuality = name;
+        quality = qualityProfiles[name];
+        runtimeTier = 0;
+        applyRuntimeTier({ resetDpr: true });
+        document.querySelectorAll('[data-quality]').forEach((button) => button.classList.toggle('active', button.dataset.quality === name));
+        renderer.shadowMap.needsUpdate = true;
+      }
+
+      document.querySelectorAll('[data-quality]').forEach((button) => button.addEventListener('click', () => setQuality(button.dataset.quality)));
+      addEventListener('keydown', (event) => {
+        if (event.key === '1') setQuality('performance');
+        if (event.key === '2') setQuality('high');
+        if (event.key === '3') setQuality('cinematic');
+      });
+
+      function warpedDomain(x, z, time) {
+        return [
+          x + Math.sin(x * 0.0527 + z * 0.0311 - time * 0.119) * 0.62 + Math.sin(x * -0.0219 + z * 0.0863 + time * 0.071 + 1.83) * 0.31,
+          z + Math.cos(x * -0.0383 + z * 0.0679 + time * 0.087) * 0.62 + Math.cos(x * 0.0781 + z * 0.0197 - time * 0.064 + 4.11) * 0.31,
+        ];
+      }
+
+      function packetEnvelope(x, z, wave, time) {
+        const across = -wave.z * x + wave.x * z;
+        const diagonalX = wave.x + 0.311;
+        const diagonalZ = wave.z - 0.217;
+        const inverseLength = 1 / Math.hypot(diagonalX, diagonalZ);
+        const diagonal = (diagonalX * x + diagonalZ * z) * inverseLength;
+        const value = 0.86
+          + Math.sin(across * 0.0713 + wave.phase * 1.71 - time * 0.0527) * 0.12
+          + Math.sin(diagonal * 0.0391 - wave.phase * 0.83 + time * 0.0319) * 0.085
+          + Math.cos(x * 0.0571 - z * 0.0427 + wave.phase * 2.17 - time * 0.021) * 0.045;
+        return Math.min(1.19, Math.max(0.60, value));
+      }
+
+      function sampleOcean(x, z, time) {
+        const [warpedX, warpedZ] = warpedDomain(x, z, time);
+        let height = 0;
+        let slopeX = 0;
+        let slopeZ = 0;
+        for (let index = 0; index < runtimeQuality.waveCount; index++) {
+          const wave = waveSpectrum[index];
+          const k = Math.PI * 2 / wave.wavelength;
+          const omega = Math.sqrt(9.81 * k) * wave.speed;
+          const amplitude = wave.amplitude * packetEnvelope(x, z, wave, time);
+          const phase = k * (wave.x * warpedX + wave.z * warpedZ) - omega * time + wave.phase;
+          height += amplitude * Math.sin(phase);
+          const slope = amplitude * k * Math.cos(phase);
+          slopeX += wave.x * slope;
+          slopeZ += wave.z * slope;
+        }
+        return { height, slopeX, slopeZ };
+      }
+
+      const clock = new THREE.Clock();
+      let oceanTime = 0;
+      const worldUp = new THREE.Vector3(0, 1, 0);
+      const buoyNormal = new THREE.Vector3();
+      const buoyRotation = new THREE.Quaternion();
+      let frameIndex = 0;
+      let lastFrameNow = performance.now();
+      let smoothedFrame = 16.7;
+      let statsAccumulation = 0;
+      let statsFrames = 0;
+      let statsStart = lastFrameNow;
+      let lastAdaptation = lastFrameNow;
+      let lastGovernorCheck = lastFrameNow;
+      let underBudgetSince = 0;
+      let reflectionPrimed = false;
+      let refractionPrimed = false;
+      // Keep an explicit turn. Frame parity would starve one capture when both
+      // targets share an update cadence and are therefore due on the same parity.
+      let staggerReflectionNext = true;
+
+      function adaptPixelRatio(now) {
+        if (now - lastAdaptation < 2200) return;
+        lastAdaptation = now;
+        const ceiling = Math.min(devicePixelRatio, runtimeQuality.dpr);
+        let next = renderDpr;
+        if (smoothedFrame > runtimeQuality.targetFrame * 1.08) next = Math.max(runtimeQuality.minDpr, renderDpr - 0.12);
+        else if (smoothedFrame < runtimeQuality.targetFrame * 0.72) next = Math.min(ceiling, renderDpr + 0.07);
+        if (Math.abs(next - renderDpr) > 0.01) {
+          renderDpr = next;
+          renderer.setPixelRatio(renderDpr);
+          renderer.setSize(innerWidth, innerHeight, false);
+          waterUniforms.uResolution.value.set(innerWidth * renderDpr, innerHeight * renderDpr);
+          resizeRenderTargets();
+        }
+      }
+
+      function governRuntimeTier(now) {
+        if (now - lastGovernorCheck < 850) return;
+        lastGovernorCheck = now;
+
+        const overBudget = smoothedFrame > runtimeQuality.targetFrame * 1.18;
+        if (overBudget && runtimeTier < quality.tiers.length - 1) {
+          runtimeTier++;
+          underBudgetSince = 0;
+          applyRuntimeTier();
+          return;
+        }
+
+        const comfortablyFast = smoothedFrame < runtimeQuality.targetFrame * 0.68;
+        if (runtimeTier > 0 && comfortablyFast) {
+          if (underBudgetSince === 0) underBudgetSince = now;
+          // Restoration is deliberately much slower than degradation so the
+          // page does not oscillate when a camera move briefly changes cost.
+          if (now - underBudgetSince > 4800) {
+            runtimeTier--;
+            underBudgetSince = 0;
+            applyRuntimeTier();
+          }
+        } else {
+          underBudgetSince = 0;
+        }
+      }
+
+      function renderSceneCaptures() {
+        const reflectionDue = !reflectionPrimed || frameIndex % runtimeQuality.reflectRate === 0;
+        const refractionDue = !refractionPrimed || frameIndex % runtimeQuality.refractRate === 0;
+        const shouldStagger = runtimeQuality.staggerCaptures
+          && reflectionPrimed
+          && refractionPrimed
+          && reflectionDue
+          && refractionDue;
+
+        if (shouldStagger) {
+          if (staggerReflectionNext) {
+            renderReflection();
+            reflectionPrimed = true;
+          } else {
+            renderRefraction();
+            refractionPrimed = true;
+          }
+          staggerReflectionNext = !staggerReflectionNext;
+          return;
+        }
+
+        if (reflectionDue) {
+          renderReflection();
+          reflectionPrimed = true;
+        }
+        if (refractionDue) {
+          renderRefraction();
+          refractionPrimed = true;
+        }
+      }
+
+      function updateStats(now, rawFrameTime) {
+        statsAccumulation += rawFrameTime;
+        statsFrames++;
+        if (now - statsStart < 550) return;
+        const elapsed = now - statsStart;
+        document.getElementById('fps').textContent = Math.round(statsFrames * 1000 / elapsed);
+        document.getElementById('frame').textContent = `${(statsAccumulation / statsFrames).toFixed(1)} ms`;
+        document.getElementById('triangles').textContent = renderer.info.render.triangles.toLocaleString();
+        document.getElementById('dpr').textContent = renderDpr.toFixed(2);
+        statsAccumulation = 0;
+        statsFrames = 0;
+        statsStart = now;
+      }
+
+      function animate(now) {
+        const rawFrameTime = Math.min(now - lastFrameNow, 80);
+        lastFrameNow = now;
+        if (rawFrameTime > 0) smoothedFrame += (rawFrameTime - smoothedFrame) * 0.045;
+        // Clamp the delta so returning from a hidden tab neither fast-forwards
+        // the ocean nor creates a large transient in the adaptive-quality logic.
+        oceanTime += Math.min(clock.getDelta(), 0.05);
+        const time = oceanTime;
+        renderer.info.reset();
+        waterUniforms.uTime.value = time;
+        skyUniforms.uCameraAltitude.value = camera.position.y;
+        controls.update();
+
+        const sample = sampleOcean(buoyAnchor.x, buoyAnchor.y, time);
+        buoy.position.y = sample.height + 0.34;
+        buoyNormal.set(-sample.slopeX, 1, -sample.slopeZ).normalize();
+        buoyRotation.setFromUnitVectors(worldUp, buoyNormal);
+        buoy.quaternion.slerp(buoyRotation, 0.075);
+        radar.rotation.y += 0.012;
+        beaconMaterial.emissiveIntensity = 0.22 + Math.pow(Math.max(0, Math.sin(time * 2.15)), 18) * 4.0;
+
+        sky.position.copy(camera.position);
+        renderSceneCaptures();
+        sky.position.copy(camera.position);
+        renderer.setClearColor(scene.background, 1);
+        renderer.render(scene, camera);
+        adaptPixelRatio(now);
+        governRuntimeTier(now);
+        updateStats(now, rawFrameTime);
+        frameIndex++;
+      }
+
+      renderer.shadowMap.autoUpdate = false;
+      renderer.shadowMap.needsUpdate = true;
+      setQuality(activeQuality);
+      renderer.setAnimationLoop(animate);
+      requestAnimationFrame(() => document.getElementById('loading').classList.add('hidden'));
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          renderer.setAnimationLoop(null);
+        } else {
+          lastFrameNow = performance.now();
+          clock.getDelta();
+          renderer.setAnimationLoop(animate);
+        }
+      });
+
+      addEventListener('resize', () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight, false);
+        waterUniforms.uResolution.value.set(innerWidth * renderDpr, innerHeight * renderDpr);
+        resizeRenderTargets();
+      });
+    </script>
+  </body>
+</html>
