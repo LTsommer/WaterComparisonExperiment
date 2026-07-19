@@ -199,7 +199,13 @@ public sealed class ExtremeOceanRenderer : MonoBehaviour
         if (opaqueCaptureBuffer == null)
         {
             opaqueCaptureBuffer = new CommandBuffer { name = "Extreme Ocean - capture opaque scene" };
-            opaqueCaptureBuffer.Blit(BuiltinRenderTextureType.CurrentActive, new RenderTargetIdentifier(opaqueSceneTexture));
+            // BeforeForwardAlpha inherits the camera's active viewport. On a Retina or
+            // fullscreen target that viewport can be larger than this downscaled texture,
+            // leaving only a centred rectangle populated by the blit. Bind the target and
+            // reset its viewport explicitly before copying the opaque camera colour.
+            opaqueCaptureBuffer.SetRenderTarget(new RenderTargetIdentifier(opaqueSceneTexture));
+            opaqueCaptureBuffer.SetViewport(new Rect(0f, 0f, width, height));
+            opaqueCaptureBuffer.Blit(BuiltinRenderTextureType.CameraTarget, BuiltinRenderTextureType.CurrentActive);
             opaqueCaptureBuffer.SetGlobalTexture(OpaqueSceneTextureId, new RenderTargetIdentifier(opaqueSceneTexture));
             opaqueCaptureBuffer.SetGlobalVector(OpaqueSceneResolutionId, BuildResolutionVector(width, height));
             cameraToUse.AddCommandBuffer(CameraEvent.BeforeForwardAlpha, opaqueCaptureBuffer);
