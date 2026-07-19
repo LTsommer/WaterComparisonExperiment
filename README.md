@@ -8,6 +8,12 @@
 
 上图依次展示 Three.js Extreme 的流畅、高、极致三档画质（约 10 秒循环）。
 
+## Unity 画质预览
+
+![Unity Extreme 海面画质：流畅、高、极致](assets/unity-ocean-quality-modes.gif)
+
+上图依次展示 Unity Extreme 的流畅、高、极致三档画质（约 10 秒循环）。
+
 ## 快速开始
 
 | 运行环境 | 入口 | 操作 |
